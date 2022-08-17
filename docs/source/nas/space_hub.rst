@@ -128,19 +128,64 @@ In the example above, ``MobileNetV3Space`` can be replaced with any model spaces
 
 .. todos: measure latencies and flops, reproduce training.
 
-Searching within model spaces
+
+Searching within well-trained model spaces
 -----------------------------
-
-To search within a model space for a new architecture on a particular dataset,
-users need to create model space, search strategy, and evaluator following the :doc:`standard procedures </tutorials/hello_nas>`.
-
-Here is a short sample code snippet for reference.
+To search the best subnet within a well-trained model space or super-net, users need to create model space with pretrained supernet weights, evolution strategy, and evaluator following the :doc:`standard procedures </tutorials/hello_nas>`. The latency constraints in :doc:`Hardware-aware NAS </nas/hardware_aware_nas>` is also optional.
 
 .. code-block:: python
 
    # Create the model space
    from nni.retiarii.hub.pytorch import MobileNetV3Space
    model_space = MobileNetV3Space()
+   model_space.load_state_dict(torch.load("pretrained.pth"))
+
+   # Pick a search strategy
+   from nni.retiarii.strategy import Evolution
+   latency_filter = LatencyFilter()   # Hardware-aware NAS is optional
+   strategy = Evolution()  # It should be an evolution strategy.
+
+   # Define a function evaluator
+   from nni.retiarii.evaluator.functional import FunctionalEvaluator
+
+   @torch.no_grad()
+   def evaluate(class_cls, pretrained):
+      model = class_cls()
+      # slice subnet params from supernet
+      state_dict = sub_state_dict(model, torch.load(pretrained))
+      model.load_state_dict(state_dict)
+      model.eval()
+
+      dataloader = Dataloader(dataset, batch_size=batch_size)
+
+      for inputs, targets in dataloader:
+         # Evaluate metric on valid set
+         metric = ...
+         nni.report_intermediate_result(metric)
+
+      # report the final result
+      nni.report_final_result(metric)
+
+   evaluator = FunctionalEvaluator(evaluate, pretrained="supernet.pth")
+
+   # Launch the experiment, start the search process
+   experiment = RetiariiExperiment(model_space, evaluator, [], strategy)
+   experiment.run(experiment_config)
+
+
+Model spaces fine-tuning or train from scratch
+-----------------------------
+To fine-tuning or train the model spaces from scratch on a particular dataset,
+users need to create model space, search strategy, and evaluator following the :doc:`standard procedures </tutorials/hello_nas>`.
+
+Here is a short sample code snippet for reference.
+.. code-block:: python
+
+   # Create the model space
+   from nni.retiarii.hub.pytorch import MobileNetV3Space
+   model_space = MobileNetV3Space()
+   # When fine-tuning the model spaces, users need to load the pre-trained weights.
+   model_space.load_state_dict(torch.load("pretrained.pth"))
 
    # Pick a search strategy
    from nni.retiarii.strategy import Evolution
@@ -148,11 +193,15 @@ Here is a short sample code snippet for reference.
 
    # Define an evaluator
    from nni.retiarii.evaluator.pytorch import Classification
-   evaluator = Classification(train_dataloaders=DataLoader(train_dataset, batch_size=batch_size),
-                              val_dataloaders=DataLoader(test_dataset, batch_size=batch_size))
+   evaluator = Classification(
+      criterion = nn.CrossEntropyLoss,
+      optimizer = optim.Adam,
+      learning_rate = 0.001,
+      weight_decay = 0.,
+      train_dataloaders=DataLoader(train_dataset, batch_size=batch_size),
+      val_dataloaders=DataLoader(test_dataset, batch_size=batch_size)
+   )
 
    # Launch the experiment, start the search process
    experiment = RetiariiExperiment(model_space, evaluator, [], strategy)
    experiment.run(experiment_config)
-
-.. todo: search reproduction results

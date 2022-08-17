@@ -179,6 +179,7 @@ To fine-tuning or train the model spaces from scratch on a particular dataset,
 users need to create model space, search strategy, and evaluator following the :doc:`standard procedures </tutorials/hello_nas>`.
 
 Here is a short sample code snippet for reference.
+
 .. code-block:: python
 
    # Create the model space

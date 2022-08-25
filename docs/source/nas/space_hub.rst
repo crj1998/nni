@@ -19,27 +19,27 @@ The model spaces provided so far are all built for image classification tasks, t
 
    * - Name
      - Brief Description
-   * - :class:`~nni.retiarii.hub.pytorch.NasBench101`
+   * - :class:`~nni.nas.hub.pytorch.NasBench101`
      - Search space benchmarked by `NAS-Bench-101 <http://proceedings.mlr.press/v97/ying19a/ying19a.pdf>`__
-   * - :class:`~nni.retiarii.hub.pytorch.NasBench201`
+   * - :class:`~nni.nas.hub.pytorch.NasBench201`
      - Search space benchmarked by `NAS-Bench-201 <https://arxiv.org/abs/2001.00326>`__
-   * - :class:`~nni.retiarii.hub.pytorch.NASNet`
+   * - :class:`~nni.nas.hub.pytorch.NASNet`
      - Proposed by `Learning Transferable Architectures for Scalable Image Recognition <https://arxiv.org/abs/1707.07012>`__
-   * - :class:`~nni.retiarii.hub.pytorch.ENAS`
+   * - :class:`~nni.nas.hub.pytorch.ENAS`
      - Proposed by `Efficient neural architecture search via parameter sharing <https://arxiv.org/abs/1802.03268>`__, subtly different from NASNet
-   * - :class:`~nni.retiarii.hub.pytorch.AmoebaNet`
+   * - :class:`~nni.nas.hub.pytorch.AmoebaNet`
      - Proposed by `Regularized evolution for image classifier architecture search <https://arxiv.org/abs/1802.01548>`__, subtly different from NASNet
-   * - :class:`~nni.retiarii.hub.pytorch.PNAS`
+   * - :class:`~nni.nas.hub.pytorch.PNAS`
      - Proposed by `Progressive neural architecture search <https://arxiv.org/abs/1712.00559>`__, subtly different from NASNet
-   * - :class:`~nni.retiarii.hub.pytorch.DARTS`
+   * - :class:`~nni.nas.hub.pytorch.DARTS`
      - Proposed by `Darts: Differentiable architecture search <https://arxiv.org/abs/1806.09055>`__, most popularly used in evaluating one-shot algorithms
-   * - :class:`~nni.retiarii.hub.pytorch.ProxylessNAS`
+   * - :class:`~nni.nas.hub.pytorch.ProxylessNAS`
      - Proposed by `ProxylessNAS <https://arxiv.org/abs/1812.00332>`__, based on MobileNetV2.
-   * - :class:`~nni.retiarii.hub.pytorch.MobileNetV3Space`
+   * - :class:`~nni.nas.hub.pytorch.MobileNetV3Space`
      - The largest space in `TuNAS <https://arxiv.org/abs/2008.06120>`__.
-   * - :class:`~nni.retiarii.hub.pytorch.ShuffleNetSpace`
+   * - :class:`~nni.nas.hub.pytorch.ShuffleNetSpace`
      - Based on ShuffleNetV2, proposed by `Single Path One-shot <https://www.ecva.net/papers/eccv_2020/papers_ECCV/papers/123610528.pdf>`__
-   * - :class:`~nni.retiarii.hub.pytorch.AutoformerSpace`
+   * - :class:`~nni.nas.hub.pytorch.AutoformerSpace`
      - Based on ViT, proposed by `Autoformer <https://arxiv.org/abs/2107.00651>`__
 
 .. note::
@@ -58,7 +58,7 @@ One way to use the model space is to directly leverage the searched results. Not
 
 .. code-block:: python
 
-   from nni.retiarii.hub.pytorch import MobileNetV3Space
+   from nni.nas.hub.pytorch import MobileNetV3Space
 
    # Load one of the searched results from MobileNetV3 search space.
    mobilenetv3 = MobileNetV3Space.load_searched_model(
@@ -136,23 +136,31 @@ To search the best subnet within a well-trained model space or super-net, users 
 .. code-block:: python
 
    # Create the model space
-   from nni.retiarii.hub.pytorch import MobileNetV3Space
+   from nni.nas.hub.pytorch import MobileNetV3Space
    model_space = MobileNetV3Space()
-   model_space.load_state_dict(torch.load("pretrained.pth"))
 
    # Pick a search strategy
-   from nni.retiarii.strategy import Evolution
+   from nni.nas.strategy import Evolution, RandomOneShot
    latency_filter = LatencyFilter()   # Hardware-aware NAS is optional
    strategy = Evolution()  # It should be an evolution strategy.
 
    # Define a function evaluator
-   from nni.retiarii.evaluator.functional import FunctionalEvaluator
+   from nni.nas.evaluator.functional import FunctionalEvaluator
 
    @torch.no_grad()
    def evaluate(class_cls, pretrained):
-      model = class_cls()
+      # define the sub-model sample strategy
+      strategy = RandomOneShot()
+      # attach the model space to strategy
+      strategy.attach_model(model_space)
+      # load the pretrained supernet
+      strategy.model.load_state_dict(torch.load(pretrained))
+      # get the arch dict of the current sub-model
+      arch = nni.get_current_parameter()['mutation_summary']
       # slice subnet params from supernet
-      state_dict = sub_state_dict(model, torch.load(pretrained))
+      state_dict = strategy.sub_state_dict(arch)
+      # sub-model instantiation
+      model = class_cls()
       model.load_state_dict(state_dict)
       model.eval()
 
@@ -183,24 +191,24 @@ Here is a short sample code snippet for reference.
 .. code-block:: python
 
    # Create the model space
-   from nni.retiarii.hub.pytorch import MobileNetV3Space
+   from nni.nas.hub.pytorch import MobileNetV3Space
    model_space = MobileNetV3Space()
-   # When fine-tuning the model spaces, users need to load the pre-trained weights.
-   model_space.load_state_dict(torch.load("pretrained.pth"))
 
    # Pick a search strategy
-   from nni.retiarii.strategy import Evolution
+   from nni.nas.strategy import Evolution
    strategy = Evolution()  # It can be any strategy, including one-shot strategies.
 
    # Define an evaluator
-   from nni.retiarii.evaluator.pytorch import Classification
+   from nni.nas.evaluator.pytorch import Classification
    evaluator = Classification(
       criterion = nn.CrossEntropyLoss,
       optimizer = optim.Adam,
       learning_rate = 0.001,
       weight_decay = 0.,
       train_dataloaders=DataLoader(train_dataset, batch_size=batch_size),
-      val_dataloaders=DataLoader(test_dataset, batch_size=batch_size)
+      val_dataloaders=DataLoader(test_dataset, batch_size=batch_size),
+      # When fine-tuning the model spaces, users need to load the pre-trained weights. It will be used in `lightingmodule.on_fit_start`.
+      pretrained="supernet.pth"
    )
 
    # Launch the experiment, start the search process
